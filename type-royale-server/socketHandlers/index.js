@@ -43,22 +43,52 @@ function setupSocketHandlers(io) {
         return;
       }
 
-      const result = room.addPlayer({
-        socketId: socket.id,
-        userId: userId,
-        username: username || "Player 2",
-      });
-
-      if (!result.success) {
-        socket.emit("join_room_error", {
-          success: false,
-          message: result.message,
+      // Check if player is reconnecting (same username or userId)
+      let playerId = null;
+      if (room.players.player1?.username === username || room.players.player1?.userId === userId) {
+        playerId = "player1";
+        console.log(`🔄 ${username} reconnecting as player1 in room ${roomId}`);
+        // Update socket ID for reconnection
+        room.players.player1.socketId = socket.id;
+      } else if (room.players.player2?.username === username || room.players.player2?.userId === userId) {
+        playerId = "player2";
+        console.log(`🔄 ${username} reconnecting as player2 in room ${roomId}`);
+        // Update socket ID for reconnection
+        room.players.player2.socketId = socket.id;
+      } else {
+        // New player joining
+        const result = room.addPlayer({
+          socketId: socket.id,
+          userId: userId,
+          username: username || "Player 2",
         });
-        return;
+
+        if (!result.success) {
+          socket.emit("join_room_error", {
+            success: false,
+            message: result.message,
+          });
+          return;
+        }
+        playerId = "player2";
+        console.log(`👥 ${username} joined room: ${roomId}`);
       }
 
       socket.join(roomId);
-      console.log(`👥 ${username} joined room: ${roomId}`);
+
+      // Send current game state to the player
+      const gameState = room.getGameState();
+      
+      // If game is already started, send game_start event to reconnecting player
+      if (room.gameStarted) {
+        const playerWords = room.players[playerId].words;
+        socket.emit("game_start", {
+          gameState: gameState,
+          words: playerWords,
+          yourPlayerId: playerId,
+          wordPoolMetadata: room.wordPool?.metadata,
+        });
+      }
 
       // Notify both players with room_update event
       io.to(roomId).emit("room_update", {
@@ -67,11 +97,11 @@ function setupSocketHandlers(io) {
           { username: room.players.player1.username, playerId: "player1" },
           { username: room.players.player2?.username, playerId: "player2" },
         ],
-        gameState: room.getGameState(),
+        gameState: gameState,
       });
     });
 
-    // PLAYER READY
+    // PLAYER READY (Host starts the game)
     socket.on("player_ready", async (data) => {
       const { roomId } = data;
       const room = rooms.get(roomId);
@@ -87,47 +117,53 @@ function setupSocketHandlers(io) {
         return;
       }
 
-      const bothReady = room.setReady(playerId);
+      // Only host (player1) can start the game
+      if (playerId !== "player1") {
+        socket.emit("error", { message: "Only the host can start the game" });
+        return;
+      }
 
-      if (bothReady) {
-        // Game starts! Generate words using AI
-        console.log(
-          `🎮 Game starting in room: ${roomId} - Generating words...`
-        );
+      // Check if both players are in the room
+      if (!room.players.player2) {
+        socket.emit("error", { message: "Waiting for opponent to join" });
+        return;
+      }
 
-        try {
-          // Initialize game words (async with Gemini AI)
-          const wordResult = await room.initializeGameWords();
+      // Mark both players as ready and start the game
+      room.setReady("player1");
+      room.setReady("player2");
 
-          // Send initial words to each player
-          const p1Socket = room.players.player1.socketId;
-          const p2Socket = room.players.player2.socketId;
+      // Game starts! Generate words using AI
+      console.log(`🎮 Game starting in room: ${roomId} - Generating words...`);
 
-          io.to(p1Socket).emit("game_start", {
-            gameState: room.getGameState(),
-            words: room.players.player1.words,
-            yourPlayerId: "player1",
-            wordPoolMetadata: wordResult.wordPool.metadata,
-          });
+      try {
+        // Initialize game words (async with Gemini AI)
+        const wordResult = await room.initializeGameWords();
 
-          io.to(p2Socket).emit("game_start", {
-            gameState: room.getGameState(),
-            words: room.players.player2.words,
-            yourPlayerId: "player2",
-            wordPoolMetadata: wordResult.wordPool.metadata,
-          });
+        // Send initial words to each player
+        const p1Socket = room.players.player1.socketId;
+        const p2Socket = room.players.player2.socketId;
 
-          console.log(`✅ Game initialized successfully in room: ${roomId}`);
-        } catch (error) {
-          console.error(`❌ Error starting game: ${error.message}`);
-          io.to(roomId).emit("game_start_error", {
-            message: "Failed to start game",
-            error: error.message,
-          });
-        }
-      } else {
-        io.to(roomId).emit("player_ready_update", {
+        io.to(p1Socket).emit("game_start", {
           gameState: room.getGameState(),
+          words: room.players.player1.words,
+          yourPlayerId: "player1",
+          wordPoolMetadata: wordResult.wordPool.metadata,
+        });
+
+        io.to(p2Socket).emit("game_start", {
+          gameState: room.getGameState(),
+          words: room.players.player2.words,
+          yourPlayerId: "player2",
+          wordPoolMetadata: wordResult.wordPool.metadata,
+        });
+
+        console.log(`✅ Game initialized successfully in room: ${roomId}`);
+      } catch (error) {
+        console.error(`❌ Error starting game: ${error.message}`);
+        io.to(roomId).emit("game_start_error", {
+          message: "Failed to start game",
+          error: error.message,
         });
       }
     });
@@ -267,17 +303,26 @@ function setupSocketHandlers(io) {
         if (playerId) {
           console.log(`👋 ${playerId} left room ${roomId}`);
 
-          // Notify other player
-          io.to(roomId).emit("player_disconnected", {
-            playerId,
-            message: "Opponent disconnected",
-          });
+          // Don't immediately notify - they might be refreshing
+          // Only notify after a delay if they don't reconnect
+          const notifyTimeout = setTimeout(() => {
+            io.to(roomId).emit("player_disconnected", {
+              playerId,
+              message: "Opponent disconnected",
+            });
+          }, 5000); // 5 second grace period
 
-          // Clean up room after some time
+          // Clean up room after longer time to allow reconnection
           setTimeout(() => {
-            rooms.delete(roomId);
-            console.log(`🗑️ Room ${roomId} deleted`);
-          }, 30000); // 30 seconds
+            // Only delete if game hasn't started or both players are gone
+            const stillExists = rooms.get(roomId);
+            if (stillExists && !stillExists.gameStarted) {
+              rooms.delete(roomId);
+              console.log(`🗑️ Room ${roomId} deleted (not started)`);
+            } else if (stillExists) {
+              console.log(`⏳ Keeping room ${roomId} alive for reconnection`);
+            }
+          }, 300000); // 5 minutes for active games
         }
       }
     });
