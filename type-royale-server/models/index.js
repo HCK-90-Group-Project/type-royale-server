@@ -31,11 +31,51 @@ fs
     db[model.name] = model;
   });
 
+// Define Type Royale associations after all models loaded
 Object.keys(db).forEach(modelName => {
   if (db[modelName].associate) {
     db[modelName].associate(db);
   }
 });
+
+// Type Royale specific associations
+if (db.User && db.MatchHistory) {
+  db.User.hasMany(db.MatchHistory, { 
+    as: 'player1Matches', 
+    foreignKey: 'player1_id',
+    onDelete: 'CASCADE'
+  });
+
+  db.User.hasMany(db.MatchHistory, { 
+    as: 'player2Matches', 
+    foreignKey: 'player2_id',
+    onDelete: 'CASCADE'
+  });
+
+  db.User.hasMany(db.MatchHistory, { 
+    as: 'wonMatches', 
+    foreignKey: 'winner_id',
+    onDelete: 'SET NULL'
+  });
+
+  db.MatchHistory.belongsTo(db.User, { 
+    as: 'player1', 
+    foreignKey: 'player1_id'
+  });
+
+  db.MatchHistory.belongsTo(db.User, { 
+    as: 'player2', 
+    foreignKey: 'player2_id'
+  });
+
+  db.MatchHistory.belongsTo(db.User, { 
+    as: 'winner', 
+    foreignKey: 'winner_id'
+  });
+}
+
+// WordBank doesn't have direct relationship with User/MatchHistory
+// since it's used for spell word generation and supply to Socket Architect
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
