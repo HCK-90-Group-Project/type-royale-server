@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const { server, io } = require('./app');
 const setupSocketHandlers = require('./socketHandlers');
 

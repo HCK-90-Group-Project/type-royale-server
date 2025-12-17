@@ -33,12 +33,12 @@ const cardConfig = {
     color: '#00FF00'
   },
   medium: {
-    damage: 30,
+    damage: 15,
     speed: 2000, // ms to reach target (normal)
     color: '#FFFF00'
   },
   hard: {
-    damage: 80,
+    damage: 20,
     speed: 3500, // ms to reach target (slow)
     color: '#FF0000'
   },
