@@ -1,11 +1,11 @@
-const { Sequelize } = require('sequelize');
-const fs = require('fs');
-const path = require('path');
+const { Sequelize } = require("sequelize");
+const fs = require("fs");
+const path = require("path");
 
 // Load database configuration from config.json
-const configPath = path.resolve(__dirname, 'config', 'config.json');
-const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-const env = process.env.NODE_ENV || 'development';
+const configPath = path.resolve(__dirname, "config", "config.json");
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const env = process.env.NODE_ENV || "development";
 const dbConfig = config[env];
 
 // Database configuration
@@ -16,40 +16,40 @@ const sequelize = new Sequelize({
   username: dbConfig.username,
   password: dbConfig.password,
   dialect: dbConfig.dialect,
-  logging: env === 'development' ? console.log : false,
+  logging: env === "development" ? console.log : false,
   pool: {
     max: 10,
     min: 0,
     acquire: 30000,
-    idle: 10000
+    idle: 10000,
   },
   define: {
     freezeTableName: true,
     timestamps: true,
-    underscored: true
-  }
+    underscored: true,
+  },
 });
 
 // Test database connection
-export const testConnection = async () => {
+const testConnection = async () => {
   try {
     await sequelize.authenticate();
-    console.log('✅ PostgreSQL connection established successfully');
+    console.log("✅ PostgreSQL connection established successfully");
     return true;
   } catch (error) {
-    console.error('❌ Unable to connect to PostgreSQL:', error.message);
+    console.error("❌ Unable to connect to PostgreSQL:", error.message);
     return false;
   }
 };
 
 // Sync database
-export const syncDatabase = async (force = false) => {
+const syncDatabase = async (force = false) => {
   try {
     await sequelize.sync({ force });
-    console.log(`✅ Database synced${force ? ' (forced)' : ''}`);
+    console.log(`✅ Database synced${force ? " (forced)" : ""}`);
     return true;
   } catch (error) {
-    console.error('❌ Error syncing database:', error);
+    console.error("❌ Error syncing database:", error);
     return false;
   }
 };

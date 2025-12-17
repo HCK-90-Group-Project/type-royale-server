@@ -1,19 +1,18 @@
-const AIService = require('../services/AIService.js');
-const { WordBank } = require('../models/index.js');
-import { Op } from 'sequelize';
+const AIService = require("../services/AIService.js");
+const { WordBank } = require("../models/index.js");
+const { Op } = require("sequelize");
 
 class WordController {
-
   /**
    * Generate 50-word ammo pool for Type Royale game session
    * Endpoint utama untuk Socket Architect
    */
   async generateGameAmmo(req, res) {
     try {
-      const { topic = 'magic', forceGenerate = false } = req.body;
-      
+      const { topic = "magic", forceGenerate = false } = req.body;
+
       console.log(`🎮 Generating 50-word ammo pool for topic: ${topic}`);
-      
+
       // Check if we already have words for this topic
       if (!forceGenerate) {
         const existingWords = await this.getExistingAmmoPool(topic);
@@ -22,29 +21,28 @@ class WordController {
           return res.json({
             success: true,
             data: existingWords,
-            cached: true
+            cached: true,
           });
         }
       }
 
       // Generate new ammo pool with AI
       const ammoPool = await AIService.generateAmmoPool(topic);
-      
+
       // Store words in database for future use
       await this.storeAmmoPool(topic, ammoPool);
-      
+
       res.json({
         success: true,
-        message: '50-word ammo pool generated successfully',
-        data: ammoPool
+        message: "50-word ammo pool generated successfully",
+        data: ammoPool,
       });
-
     } catch (error) {
-      console.error('❌ Error generating game ammo:', error);
+      console.error("❌ Error generating game ammo:", error);
       res.status(500).json({
         success: false,
-        message: 'Failed to generate ammo pool',
-        error: error.message
+        message: "Failed to generate ammo pool",
+        error: error.message,
       });
     }
   }
@@ -56,14 +54,19 @@ class WordController {
   async getSpellWord(req, res) {
     try {
       const { spellType, difficulty } = req.params;
-      const { topic = 'magic' } = req.query;
+      const { topic = "magic" } = req.query;
 
       // Validate spell type
-      const validSpellTypes = ['easy_fireball', 'medium_fireball', 'hard_fireball', 'shield'];
+      const validSpellTypes = [
+        "easy_fireball",
+        "medium_fireball",
+        "hard_fireball",
+        "shield",
+      ];
       if (!validSpellTypes.includes(spellType)) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid spell type'
+          message: "Invalid spell type",
         });
       }
 
@@ -72,8 +75,8 @@ class WordController {
         where: {
           topic: topic,
           spell_type: spellType,
-          is_active: true
-        }
+          is_active: true,
+        },
       });
 
       if (!wordBank) {
@@ -82,26 +85,25 @@ class WordController {
         return res.json({
           success: true,
           data: fallbackWord,
-          fallback: true
+          fallback: true,
         });
       }
 
       // Get random word from word bank
       const spellWord = wordBank.getRandomWord();
-      
+
       // Increment usage count
       await wordBank.incrementUsage();
 
       res.json({
         success: true,
-        data: spellWord
+        data: spellWord,
       });
-
     } catch (error) {
-      console.error('❌ Error getting spell word:', error);
+      console.error("❌ Error getting spell word:", error);
       res.status(500).json({
         success: false,
-        message: 'Failed to get spell word'
+        message: "Failed to get spell word",
       });
     }
   }
@@ -112,13 +114,13 @@ class WordController {
    */
   async getCardDeck(req, res) {
     try {
-      const { topic = 'magic', count = 10 } = req.query;
+      const { topic = "magic", count = 10 } = req.query;
 
       const deckWords = {
         easy_fireball: [],
         medium_fireball: [],
         hard_fireball: [],
-        shield: []
+        shield: [],
       };
 
       // Get words for each spell type
@@ -127,8 +129,8 @@ class WordController {
           where: {
             topic: topic,
             spell_type: spellType,
-            is_active: true
-          }
+            is_active: true,
+          },
         });
 
         if (wordBank) {
@@ -141,15 +143,14 @@ class WordController {
         data: {
           topic: topic,
           deck: deckWords,
-          total_words: Object.values(deckWords).flat().length
-        }
+          total_words: Object.values(deckWords).flat().length,
+        },
       });
-
     } catch (error) {
-      console.error('❌ Error getting card deck:', error);
+      console.error("❌ Error getting card deck:", error);
       res.status(500).json({
         success: false,
-        message: 'Failed to get card deck'
+        message: "Failed to get card deck",
       });
     }
   }
@@ -162,15 +163,24 @@ class WordController {
     try {
       const stats = await WordBank.findAll({
         attributes: [
-          'topic',
-          'spell_type',
-          [WordBank.sequelize.fn('COUNT', WordBank.sequelize.col('id')), 'bank_count'],
-          [WordBank.sequelize.fn('SUM', WordBank.sequelize.col('word_count')), 'total_words'],
-          [WordBank.sequelize.fn('SUM', WordBank.sequelize.col('usage_count')), 'total_usage']
+          "topic",
+          "spell_type",
+          [
+            WordBank.sequelize.fn("COUNT", WordBank.sequelize.col("id")),
+            "bank_count",
+          ],
+          [
+            WordBank.sequelize.fn("SUM", WordBank.sequelize.col("word_count")),
+            "total_words",
+          ],
+          [
+            WordBank.sequelize.fn("SUM", WordBank.sequelize.col("usage_count")),
+            "total_usage",
+          ],
         ],
         where: { is_active: true },
-        group: ['topic', 'spell_type'],
-        raw: true
+        group: ["topic", "spell_type"],
+        raw: true,
       });
 
       const formattedStats = stats.reduce((acc, stat) => {
@@ -180,7 +190,7 @@ class WordController {
         acc[stat.topic][stat.spell_type] = {
           bank_count: parseInt(stat.bank_count),
           total_words: parseInt(stat.total_words) || 0,
-          total_usage: parseInt(stat.total_usage) || 0
+          total_usage: parseInt(stat.total_usage) || 0,
         };
         return acc;
       }, {});
@@ -189,15 +199,14 @@ class WordController {
         success: true,
         data: {
           statistics: formattedStats,
-          topics_available: Object.keys(formattedStats)
-        }
+          topics_available: Object.keys(formattedStats),
+        },
       });
-
     } catch (error) {
-      console.error('❌ Error getting word bank stats:', error);
+      console.error("❌ Error getting word bank stats:", error);
       res.status(500).json({
         success: false,
-        message: 'Failed to get statistics'
+        message: "Failed to get statistics",
       });
     }
   }
@@ -213,7 +222,7 @@ class WordController {
       if (!topic) {
         return res.status(400).json({
           success: false,
-          message: 'Topic is required'
+          message: "Topic is required",
         });
       }
 
@@ -222,13 +231,13 @@ class WordController {
         await WordBank.destroy({
           where: {
             topic: topic,
-            spell_type: spellType
-          }
+            spell_type: spellType,
+          },
         });
       } else {
         // Delete all words for topic
         await WordBank.destroy({
-          where: { topic: topic }
+          where: { topic: topic },
         });
       }
 
@@ -241,14 +250,13 @@ class WordController {
       res.json({
         success: true,
         message: `Words regenerated for topic: ${topic}`,
-        data: ammoPool
+        data: ammoPool,
       });
-
     } catch (error) {
-      console.error('❌ Error regenerating words:', error);
+      console.error("❌ Error regenerating words:", error);
       res.status(500).json({
         success: false,
-        message: 'Failed to regenerate words'
+        message: "Failed to regenerate words",
       });
     }
   }
@@ -263,8 +271,8 @@ class WordController {
       const wordBanks = await WordBank.findAll({
         where: {
           topic: topic,
-          is_active: true
-        }
+          is_active: true,
+        },
       });
 
       if (wordBanks.length === 0) return null;
@@ -275,18 +283,18 @@ class WordController {
           easy_fireball: [],
           medium_fireball: [],
           hard_fireball: [],
-          shield: []
+          shield: [],
         },
         metadata: {
           topic: topic,
           total_words: 0,
           cached: true,
-          generated_at: wordBanks[0].createdAt
-        }
+          generated_at: wordBanks[0].createdAt,
+        },
       };
 
       // Combine words from all spell types
-      wordBanks.forEach(bank => {
+      wordBanks.forEach((bank) => {
         const words = Array.isArray(bank.words) ? bank.words : [];
         ammoPool.categories[bank.spell_type] = words;
         ammoPool.words.push(...words);
@@ -295,9 +303,8 @@ class WordController {
       ammoPool.metadata.total_words = ammoPool.words.length;
 
       return ammoPool.words.length >= 40 ? ammoPool : null; // Ensure sufficient words
-
     } catch (error) {
-      console.error('❌ Error getting existing ammo pool:', error);
+      console.error("❌ Error getting existing ammo pool:", error);
       return null;
     }
   }
@@ -307,32 +314,37 @@ class WordController {
    */
   async storeAmmoPool(topic, ammoPool) {
     try {
-      const spellTypes = ['easy_fireball', 'medium_fireball', 'hard_fireball', 'shield'];
+      const spellTypes = [
+        "easy_fireball",
+        "medium_fireball",
+        "hard_fireball",
+        "shield",
+      ];
 
       for (const spellType of spellTypes) {
         const words = ammoPool.categories[spellType] || [];
-        
+
         if (words.length > 0) {
           await WordBank.create({
             topic: topic,
             spell_type: spellType,
-            difficulty_level: spellType.includes('fireball') ? 
-              spellType.replace('_fireball', '') : 'shield',
+            difficulty_level: spellType.includes("fireball")
+              ? spellType.replace("_fireball", "")
+              : "shield",
             words: words,
             word_count: words.length,
-            ai_model: 'gemini-pro',
+            ai_model: "gemini-pro",
             generated_by_ai: true,
             damage_value: WordBank.getSpellDamage(spellType),
             spell_speed: WordBank.getSpellSpeed(spellType),
-            is_active: true
+            is_active: true,
           });
         }
       }
 
       console.log(`💾 Stored ammo pool for topic: ${topic}`);
-
     } catch (error) {
-      console.error('❌ Error storing ammo pool:', error);
+      console.error("❌ Error storing ammo pool:", error);
       throw error;
     }
   }
