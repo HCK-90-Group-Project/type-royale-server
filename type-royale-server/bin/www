@@ -1,0 +1,14 @@
+const { server, io } = require("../app");
+const setupSocketHandlers = require("../socketHandlers");
+const PORT = process.env.PORT || 3000;
+
+if(process.env.NODE_ENV !== 'production'){
+  require('dotenv').config()
+}
+
+// Setup socket handlers
+setupSocketHandlers(io);
+
+server.listen(PORT, () => {
+  console.log(`Server can be accessed at http://localhost:${PORT}`);
+});
