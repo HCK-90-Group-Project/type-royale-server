@@ -101,17 +101,17 @@ const wordPool = {
 const cardConfig = {
   easy: {
     damage: 10,
-    speed: 1000, // ms to reach target (fast)
+    speed: 100, // ms to reach target (instant)
     color: "#00FF00",
   },
   medium: {
     damage: 15,
-    speed: 2000, // ms to reach target (normal)
+    speed: 100, // ms to reach target (instant)
     color: "#FFFF00",
   },
   hard: {
     damage: 20,
-    speed: 3500, // ms to reach target (slow)
+    speed: 100, // ms to reach target (instant)
     color: "#FF0000",
   },
   shield: {
