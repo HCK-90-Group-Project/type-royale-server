@@ -1,26 +1,57 @@
 const { Sequelize } = require("sequelize");
 
-// Database configuration from environment variables
-const sequelize = new Sequelize({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'TypeRoyale',
-  username: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
-  dialect: process.env.DB_DIALECT || 'postgres',
-  logging: process.env.NODE_ENV === 'development' ? console.log : false,
-  pool: {
-    max: 10,
-    min: 0,
-    acquire: 30000,
-    idle: 10000,
-  },
-  define: {
-    freezeTableName: true,
-    timestamps: true,
-    underscored: true,
-  },
-});
+// Determine if we should use DATABASE_URL (production) or individual vars (development)
+const isProduction = process.env.NODE_ENV === 'production';
+const useConnectionString = process.env.DATABASE_URL && isProduction;
+
+let sequelize;
+
+if (useConnectionString) {
+  // Production: Use DATABASE_URL with SSL
+  sequelize = new Sequelize(process.env.DATABASE_URL, {
+    dialect: 'postgres',
+    logging: false,
+    pool: {
+      max: 10,
+      min: 0,
+      acquire: 30000,
+      idle: 10000,
+    },
+    define: {
+      freezeTableName: true,
+      timestamps: true,
+      underscored: true,
+    },
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false
+      }
+    }
+  });
+} else {
+  // Development: Use individual environment variables
+  sequelize = new Sequelize({
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME || 'TypeRoyale',
+    username: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'postgres',
+    dialect: process.env.DB_DIALECT || 'postgres',
+    logging: console.log,
+    pool: {
+      max: 10,
+      min: 0,
+      acquire: 30000,
+      idle: 10000,
+    },
+    define: {
+      freezeTableName: true,
+      timestamps: true,
+      underscored: true,
+    },
+  });
+}
 
 // Test database connection
 const testConnection = async () => {

@@ -4,8 +4,14 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const helmet = require("helmet");
 
+// Frontend URLs for CORS
+const FRONTEND_URLS = process.env.NODE_ENV === "production"
+  ? [
+      process.env.FRONTEND_URL || "https://typeroyale-2ddf6.web.app",
+      "https://typeroyale-2ddf6.firebaseapp.com"
+    ]
+  : ["http://localhost:3000", "http://localhost:5173"];
 
 // Create Express app
 const app = express();
@@ -16,10 +22,7 @@ const server = http.createServer(app);
 // Setup Socket.io with CORS
 const io = new Server(server, {
   cors: {
-    origin:
-      process.env.NODE_ENV === "production"
-        ? ["https://your-frontend-domain.com"]
-        : ["http://localhost:3000", "http://localhost:5173"],
+    origin: FRONTEND_URLS,
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -30,14 +33,10 @@ const io = new Server(server, {
   reconnectionAttempts: 5,
 });
 
-// Middleware
-app.use(helmet());
+// Middleware - Note: Helmet is applied in server.js
 app.use(
   cors({
-    origin:
-      process.env.NODE_ENV === "production"
-        ? ["https://your-frontend-domain.com"]
-        : ["http://localhost:3000", "http://localhost:5173"],
+    origin: FRONTEND_URLS,
     credentials: true,
   })
 );
