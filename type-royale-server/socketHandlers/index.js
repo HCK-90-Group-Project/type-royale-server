@@ -45,12 +45,18 @@ function setupSocketHandlers(io) {
 
       // Check if player is reconnecting (same username or userId)
       let playerId = null;
-      if (room.players.player1?.username === username || room.players.player1?.userId === userId) {
+      if (
+        room.players.player1?.username === username ||
+        room.players.player1?.userId === userId
+      ) {
         playerId = "player1";
         console.log(`🔄 ${username} reconnecting as player1 in room ${roomId}`);
         // Update socket ID for reconnection
         room.players.player1.socketId = socket.id;
-      } else if (room.players.player2?.username === username || room.players.player2?.userId === userId) {
+      } else if (
+        room.players.player2?.username === username ||
+        room.players.player2?.userId === userId
+      ) {
         playerId = "player2";
         console.log(`🔄 ${username} reconnecting as player2 in room ${roomId}`);
         // Update socket ID for reconnection
@@ -78,7 +84,7 @@ function setupSocketHandlers(io) {
 
       // Send current game state to the player
       const gameState = room.getGameState();
-      
+
       // If game is already started, send game_start event to reconnecting player
       if (room.gameStarted) {
         const playerWords = room.players[playerId].words;
@@ -279,9 +285,7 @@ function setupSocketHandlers(io) {
       });
     });
 
-    // ATTACK IMPACT (called automatically by server after delay)
-    // This is handled internally by gameLogic.js resolveAttack
-    // We listen for it to broadcast the result
+    // REQUEST GAME STATE
     socket.on("request_game_state", (data) => {
       const { roomId } = data;
       const room = rooms.get(roomId);
@@ -289,6 +293,106 @@ function setupSocketHandlers(io) {
       if (room) {
         socket.emit("game_state_update", {
           gameState: room.getGameState(),
+        });
+      }
+    });
+
+    // REJOIN ROOM (for page refresh)
+    socket.on("rejoin_room", (data) => {
+      const { roomId, username, userId, gameStatus } = data;
+
+      console.log(`🔄 Rejoin attempt: ${username} trying to rejoin ${roomId}`);
+
+      const room = rooms.get(roomId);
+
+      if (!room) {
+        console.log(`❌ Room ${roomId} not found for rejoin`);
+        socket.emit("rejoin_failed", {
+          success: false,
+          message: "Room not found or expired",
+        });
+        return;
+      }
+
+      // Find which player is trying to rejoin
+      let playerId = null;
+      if (
+        room.players.player1?.username === username ||
+        room.players.player1?.userId === userId
+      ) {
+        playerId = "player1";
+        room.players.player1.socketId = socket.id;
+        console.log(`✅ ${username} rejoined as player1 in room ${roomId}`);
+      } else if (
+        room.players.player2?.username === username ||
+        room.players.player2?.userId === userId
+      ) {
+        playerId = "player2";
+        room.players.player2.socketId = socket.id;
+        console.log(`✅ ${username} rejoined as player2 in room ${roomId}`);
+      }
+
+      if (!playerId) {
+        console.log(`❌ Player ${username} not found in room ${roomId}`);
+        socket.emit("rejoin_failed", {
+          success: false,
+          message: "Player not found in room",
+        });
+        return;
+      }
+
+      socket.join(roomId);
+
+      const gameState = room.getGameState();
+      const opponent = room.getOpponent(playerId);
+
+      // Send rejoin success with current game state
+      socket.emit("rejoin_success", {
+        success: true,
+        roomId,
+        playerId,
+        gameState: {
+          status: room.gameStarted ? "playing" : "lobby",
+          players: [
+            { username: room.players.player1.username, playerId: "player1" },
+            room.players.player2
+              ? { username: room.players.player2.username, playerId: "player2" }
+              : null,
+          ].filter(Boolean),
+        },
+        playerState: gameState[playerId]
+          ? {
+              hp: gameState[playerId].hp,
+              ammo: gameState[playerId].ammo,
+              shield: gameState[playerId].shield,
+            }
+          : null,
+        enemyState:
+          opponent && gameState[opponent]
+            ? {
+                hp: gameState[opponent].hp,
+                shield: gameState[opponent].shield,
+                username: room.players[opponent]?.username,
+              }
+            : null,
+      });
+
+      // If game is in progress, also send game_start event with words
+      if (room.gameStarted) {
+        const playerWords = room.players[playerId].words;
+        socket.emit("game_start", {
+          gameState: gameState,
+          words: playerWords,
+          yourPlayerId: playerId,
+          wordPoolMetadata: room.wordPool?.metadata,
+        });
+      }
+
+      // Notify opponent about reconnection
+      if (opponent && room.players[opponent]?.socketId) {
+        io.to(room.players[opponent].socketId).emit("player_reconnected", {
+          playerId,
+          username,
         });
       }
     });
