@@ -359,7 +359,8 @@ function setupSocketHandlers(io) {
       }
 
       // If game was in progress, declare winner
-      if (room.gameStarted && opponent && !room.players[opponent]?.disconnected) {
+      if (room.gameStarted && !room.gameEnded && opponent && !room.players[opponent]?.disconnected) {
+        room.gameEnded = true; // Prevent duplicate processing
         io.to(roomId).emit("match_result", {
           winner: opponent,
           reason: "opponent_left",
@@ -558,7 +559,8 @@ function setupSocketHandlers(io) {
               } else {
                 // If game was in progress, declare the remaining player as winner
                 const opponent = currentRoom.getOpponent(playerId);
-                if (opponent && !currentRoom.players[opponent]?.disconnected) {
+                if (opponent && !currentRoom.players[opponent]?.disconnected && !currentRoom.gameEnded) {
+                  currentRoom.gameEnded = true; // Prevent duplicate processing
                   io.to(roomId).emit("match_result", {
                     winner: opponent,
                     reason: "opponent_disconnected",
@@ -592,11 +594,17 @@ function setupSocketHandlers(io) {
   setInterval(async () => {
     for (const [roomId, room] of rooms.entries()) {
       if (!room.gameStarted) continue;
+      
+      // Skip if game already ended (prevent infinite loop!)
+      if (room.gameEnded) continue;
 
       // Check win condition
       const winCheck = room.checkWinCondition();
 
       if (winCheck.gameOver) {
+        // Mark game as ended IMMEDIATELY to prevent re-processing
+        room.gameEnded = true;
+        
         console.log(
           `🏆 Game over in ${roomId}: ${winCheck.winner} wins by ${winCheck.reason}`
         );
@@ -636,9 +644,10 @@ function setupSocketHandlers(io) {
           timestamp: new Date().toISOString(),
         });
 
-        // Clean up room
+        // Clean up room after delay
         setTimeout(() => {
           rooms.delete(roomId);
+          console.log(`🗑️ Room ${roomId} cleaned up after game end`);
         }, 10000); // 10 seconds to show results
       }
     }
