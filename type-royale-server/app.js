@@ -1,7 +1,10 @@
+require('dotenv').config();
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const helmet = require("helmet");
 
 // Create Express app
 const app = express();
@@ -27,6 +30,7 @@ const io = new Server(server, {
 });
 
 // Middleware
+app.use(helmet());
 app.use(
   cors({
     origin:

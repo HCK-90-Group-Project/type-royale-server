@@ -85,8 +85,8 @@ app.get("/api", (req, res) => {
 // Setup Socket.io handlers
 setupSocketHandlers(io);
 
-// 404 handler
-app.use("*", (req, res) => {
+// 404 handler (catch-all)
+app.use((req, res) => {
   res.status(404).json({
     success: false,
     message: "Endpoint not found",

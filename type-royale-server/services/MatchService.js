@@ -2,6 +2,20 @@ const { User, MatchHistory } = require("../models/index.js");
 
 class MatchService {
   /**
+   * Find user ID by username
+   * Returns the database ID (integer) or null if not found
+   */
+  async getUserIdByUsername(username) {
+    try {
+      const user = await User.findOne({ where: { username } });
+      return user ? user.id : null;
+    } catch (error) {
+      console.error(`Error finding user ${username}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Save match result to database
    * Called when game_over event is triggered
    */
@@ -12,22 +26,53 @@ class MatchService {
       const player1Data = finalState.player1;
       const player2Data = finalState.player2;
 
+      // Get actual database user IDs by username
+      const player1DbId = await this.getUserIdByUsername(
+        players.player1.username
+      );
+      const player2DbId = await this.getUserIdByUsername(
+        players.player2.username
+      );
+
+      // If either player is not registered, skip saving to database
+      if (!player1DbId || !player2DbId) {
+        console.log(
+          `⚠️ Skipping match save - players not registered (guest mode)`
+        );
+        console.log(
+          `   Player1 (${players.player1.username}): ${
+            player1DbId ? "registered" : "guest"
+          }`
+        );
+        console.log(
+          `   Player2 (${players.player2.username}): ${
+            player2DbId ? "registered" : "guest"
+          }`
+        );
+        return {
+          success: true,
+          matchId: null,
+          winnerId: null,
+          message: "Match not saved - guest players",
+        };
+      }
+
       // Determine winner
-      let winnerId = null;
+      let winnerDbId = null;
       let winCondition = "knockout";
 
       if (player1Data.hp <= 0 && player2Data.hp > 0) {
-        winnerId = players.player2.userId;
+        winnerDbId = player2DbId;
         winCondition = "knockout";
       } else if (player2Data.hp <= 0 && player1Data.hp > 0) {
-        winnerId = players.player1.userId;
+        winnerDbId = player1DbId;
         winCondition = "knockout";
       } else if (player1Data.ammoCount <= 0 && player2Data.ammoCount <= 0) {
         // Draw or higher HP wins
         if (player1Data.hp > player2Data.hp) {
-          winnerId = players.player1.userId;
+          winnerDbId = player1DbId;
         } else if (player2Data.hp > player1Data.hp) {
-          winnerId = players.player2.userId;
+          winnerDbId = player2DbId;
         }
         winCondition = "out_of_ammo";
       }
@@ -40,9 +85,9 @@ class MatchService {
 
       // Create match history record
       const matchHistory = await MatchHistory.create({
-        player1_id: players.player1.userId,
-        player2_id: players.player2.userId,
-        winner_id: winnerId,
+        player1_id: player1DbId,
+        player2_id: player2DbId,
+        winner_id: winnerDbId,
         game_duration: gameDuration,
         started_at: new Date(gameState.startTime),
         ended_at: now,
@@ -67,29 +112,27 @@ class MatchService {
       });
 
       // Update player statistics
-      if (winnerId) {
-        const winner =
-          winnerId === players.player1.userId
-            ? players.player1
-            : players.player2;
-        const loser =
-          winnerId === players.player1.userId
-            ? players.player2
-            : players.player1;
+      if (winnerDbId) {
+        const winnerUsername =
+          winnerDbId === player1DbId
+            ? players.player1.username
+            : players.player2.username;
+        const loserDbId =
+          winnerDbId === player1DbId ? player2DbId : player1DbId;
 
-        await this.updatePlayerStats(winner.userId, true, matchHistory);
-        await this.updatePlayerStats(loser.userId, false, matchHistory);
+        await this.updatePlayerStats(winnerDbId, true, matchHistory);
+        await this.updatePlayerStats(loserDbId, false, matchHistory);
       }
 
       console.log(
         `✅ Match result saved: ${
-          winnerId ? "Player " + winnerId + " won" : "Draw"
+          winnerDbId ? "Player ID " + winnerDbId + " won" : "Draw"
         }`
       );
       return {
         success: true,
         matchId: matchHistory.id,
-        winnerId: winnerId,
+        winnerId: winnerDbId,
       };
     } catch (error) {
       console.error(`❌ Error saving match result: ${error.message}`);

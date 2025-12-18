@@ -1,22 +1,14 @@
 const { Sequelize } = require("sequelize");
-const fs = require("fs");
-const path = require("path");
 
-// Load database configuration from config.json
-const configPath = path.resolve(__dirname, "config", "config.json");
-const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-const env = process.env.NODE_ENV || "development";
-const dbConfig = config[env];
-
-// Database configuration
+// Database configuration from environment variables
 const sequelize = new Sequelize({
-  host: dbConfig.host,
-  port: dbConfig.port || 5432,
-  database: dbConfig.database,
-  username: dbConfig.username,
-  password: dbConfig.password,
-  dialect: dbConfig.dialect,
-  logging: env === "development" ? console.log : false,
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: process.env.DB_PORT || 5432,
+  database: process.env.DB_NAME || 'TypeRoyale',
+  username: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || 'postgres',
+  dialect: process.env.DB_DIALECT || 'postgres',
+  logging: process.env.NODE_ENV === 'development' ? console.log : false,
   pool: {
     max: 10,
     min: 0,
