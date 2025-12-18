@@ -2,6 +2,11 @@ const { rooms, GameRoom } = require("./gameLogic");
 const { v4: uuidv4 } = require("uuid");
 const MatchService = require("../services/MatchService");
 
+// Track disconnection timeouts for each player to allow reconnection
+const disconnectTimeouts = new Map();
+// Track which userId is mapped to which roomId for quick reconnection
+const userRoomMap = new Map();
+
 function setupSocketHandlers(io) {
   io.on("connection", (socket) => {
     console.log(`🔌 User connected: ${socket.id}`);
@@ -19,6 +24,9 @@ function setupSocketHandlers(io) {
 
       rooms.set(roomId, gameRoom);
       socket.join(roomId);
+
+      // Track user to room mapping for quick reconnection
+      userRoomMap.set(userId, roomId);
 
       console.log(`🏠 Room created: ${roomId} by ${username}`);
 
@@ -43,6 +51,15 @@ function setupSocketHandlers(io) {
         return;
       }
 
+      // Clear any pending disconnect timeout for this user
+      const timeoutKey = `${roomId}_${userId}`;
+      if (disconnectTimeouts.has(timeoutKey)) {
+        clearTimeout(disconnectTimeouts.get(timeoutKey).notifyTimeout);
+        clearTimeout(disconnectTimeouts.get(timeoutKey).cleanupTimeout);
+        disconnectTimeouts.delete(timeoutKey);
+        console.log(`⏹️ Cleared disconnect timeout for ${username}`);
+      }
+
       // Check if player is reconnecting (same username or userId)
       let playerId = null;
       if (
@@ -53,6 +70,7 @@ function setupSocketHandlers(io) {
         console.log(`🔄 ${username} reconnecting as player1 in room ${roomId}`);
         // Update socket ID for reconnection
         room.players.player1.socketId = socket.id;
+        room.players.player1.disconnected = false;
       } else if (
         room.players.player2?.username === username ||
         room.players.player2?.userId === userId
@@ -61,6 +79,7 @@ function setupSocketHandlers(io) {
         console.log(`🔄 ${username} reconnecting as player2 in room ${roomId}`);
         // Update socket ID for reconnection
         room.players.player2.socketId = socket.id;
+        room.players.player2.disconnected = false;
       } else {
         // New player joining
         const result = room.addPlayer({
@@ -81,6 +100,9 @@ function setupSocketHandlers(io) {
       }
 
       socket.join(roomId);
+
+      // Track user to room mapping
+      userRoomMap.set(userId, roomId);
 
       // Send current game state to the player
       const gameState = room.getGameState();
@@ -297,6 +319,62 @@ function setupSocketHandlers(io) {
       }
     });
 
+    // LEAVE ROOM (intentional leave)
+    socket.on("leave_room", (data) => {
+      const { roomId } = data;
+      const room = rooms.get(roomId);
+
+      if (!room) return;
+
+      const playerId = room.getPlayerBySocketId(socket.id);
+      if (!playerId) return;
+
+      const player = room.players[playerId];
+      const userId = player?.userId;
+      const username = player?.username;
+
+      console.log(`🚪 ${username} intentionally left room ${roomId}`);
+
+      // Clear any pending disconnect timeouts
+      const timeoutKey = `${roomId}_${userId}`;
+      if (disconnectTimeouts.has(timeoutKey)) {
+        clearTimeout(disconnectTimeouts.get(timeoutKey).notifyTimeout);
+        clearTimeout(disconnectTimeouts.get(timeoutKey).cleanupTimeout);
+        disconnectTimeouts.delete(timeoutKey);
+      }
+
+      // Remove from user-room mapping
+      userRoomMap.delete(userId);
+
+      // Leave the socket room
+      socket.leave(roomId);
+
+      // Notify opponent immediately
+      const opponent = room.getOpponent(playerId);
+      if (opponent && room.players[opponent]?.socketId) {
+        io.to(room.players[opponent].socketId).emit("player_disconnected", {
+          playerId,
+          message: "Opponent left the game",
+        });
+      }
+
+      // If game was in progress, declare winner
+      if (room.gameStarted && opponent && !room.players[opponent]?.disconnected) {
+        io.to(roomId).emit("match_result", {
+          winner: opponent,
+          reason: "opponent_left",
+          finalState: room.getGameState(),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Clean up room
+      setTimeout(() => {
+        rooms.delete(roomId);
+        console.log(`🗑️ Room ${roomId} deleted (player left)`);
+      }, 5000);
+    });
+
     // REJOIN ROOM (for page refresh)
     socket.on("rejoin_room", (data) => {
       const { roomId, username, userId, gameStatus } = data;
@@ -314,6 +392,15 @@ function setupSocketHandlers(io) {
         return;
       }
 
+      // Clear any pending disconnect timeout for this user
+      const timeoutKey = `${roomId}_${userId}`;
+      if (disconnectTimeouts.has(timeoutKey)) {
+        clearTimeout(disconnectTimeouts.get(timeoutKey).notifyTimeout);
+        clearTimeout(disconnectTimeouts.get(timeoutKey).cleanupTimeout);
+        disconnectTimeouts.delete(timeoutKey);
+        console.log(`⏹️ Cleared disconnect timeout for ${username} on rejoin`);
+      }
+
       // Find which player is trying to rejoin
       let playerId = null;
       if (
@@ -322,6 +409,7 @@ function setupSocketHandlers(io) {
       ) {
         playerId = "player1";
         room.players.player1.socketId = socket.id;
+        room.players.player1.disconnected = false;
         console.log(`✅ ${username} rejoined as player1 in room ${roomId}`);
       } else if (
         room.players.player2?.username === username ||
@@ -329,6 +417,7 @@ function setupSocketHandlers(io) {
       ) {
         playerId = "player2";
         room.players.player2.socketId = socket.id;
+        room.players.player2.disconnected = false;
         console.log(`✅ ${username} rejoined as player2 in room ${roomId}`);
       }
 
@@ -342,6 +431,9 @@ function setupSocketHandlers(io) {
       }
 
       socket.join(roomId);
+
+      // Update user-room mapping
+      userRoomMap.set(userId, roomId);
 
       const gameState = room.getGameState();
       const opponent = room.getOpponent(playerId);
@@ -363,7 +455,7 @@ function setupSocketHandlers(io) {
         playerState: gameState[playerId]
           ? {
               hp: gameState[playerId].hp,
-              ammo: gameState[playerId].ammo,
+              ammo: gameState[playerId].ammoCount,
               shield: gameState[playerId].shield,
             }
           : null,
@@ -401,32 +493,96 @@ function setupSocketHandlers(io) {
     socket.on("disconnect", () => {
       console.log(`❌ User disconnected: ${socket.id}`);
 
-      // Find and cleanup rooms where this player was
+      // Find and handle rooms where this player was
       for (const [roomId, room] of rooms.entries()) {
         const playerId = room.getPlayerBySocketId(socket.id);
         if (playerId) {
-          console.log(`👋 ${playerId} left room ${roomId}`);
+          const player = room.players[playerId];
+          const userId = player?.userId;
+          const username = player?.username;
 
-          // Don't immediately notify - they might be refreshing
-          // Only notify after a delay if they don't reconnect
+          console.log(`👋 ${username} (${playerId}) temporarily disconnected from room ${roomId}`);
+
+          // Mark player as disconnected (but don't remove yet)
+          player.disconnected = true;
+          player.disconnectedAt = Date.now();
+
+          // Create a unique key for this disconnect timeout
+          const timeoutKey = `${roomId}_${userId}`;
+
+          // Don't create new timeout if one already exists
+          if (disconnectTimeouts.has(timeoutKey)) {
+            console.log(`⏳ Disconnect timeout already exists for ${username}`);
+            continue;
+          }
+
+          // Notify opponent after a short delay (they might just be refreshing)
           const notifyTimeout = setTimeout(() => {
-            io.to(roomId).emit("player_disconnected", {
-              playerId,
-              message: "Opponent disconnected",
-            });
-          }, 5000); // 5 second grace period
-
-          // Clean up room after longer time to allow reconnection
-          setTimeout(() => {
-            // Only delete if game hasn't started or both players are gone
-            const stillExists = rooms.get(roomId);
-            if (stillExists && !stillExists.gameStarted) {
-              rooms.delete(roomId);
-              console.log(`🗑️ Room ${roomId} deleted (not started)`);
-            } else if (stillExists) {
-              console.log(`⏳ Keeping room ${roomId} alive for reconnection`);
+            // Check if player is still disconnected
+            const currentRoom = rooms.get(roomId);
+            if (currentRoom && currentRoom.players[playerId]?.disconnected) {
+              const opponent = currentRoom.getOpponent(playerId);
+              if (opponent && currentRoom.players[opponent]?.socketId) {
+                io.to(currentRoom.players[opponent].socketId).emit("player_temporarily_disconnected", {
+                  playerId,
+                  username,
+                  message: "Opponent is reconnecting...",
+                });
+              }
             }
-          }, 300000); // 5 minutes for active games
+          }, 2000); // 2 second delay before notifying
+
+          // Clean up after grace period if player doesn't reconnect
+          const cleanupTimeout = setTimeout(() => {
+            const currentRoom = rooms.get(roomId);
+            if (!currentRoom) {
+              disconnectTimeouts.delete(timeoutKey);
+              return;
+            }
+
+            // Check if player is still disconnected
+            if (currentRoom.players[playerId]?.disconnected) {
+              console.log(`⏰ Grace period expired for ${username} in room ${roomId}`);
+
+              // Notify opponent that player has left permanently
+              io.to(roomId).emit("player_disconnected", {
+                playerId,
+                message: "Opponent disconnected",
+              });
+
+              // If game hasn't started, delete room
+              if (!currentRoom.gameStarted) {
+                rooms.delete(roomId);
+                userRoomMap.delete(userId);
+                console.log(`🗑️ Room ${roomId} deleted (game not started)`);
+              } else {
+                // If game was in progress, declare the remaining player as winner
+                const opponent = currentRoom.getOpponent(playerId);
+                if (opponent && !currentRoom.players[opponent]?.disconnected) {
+                  io.to(roomId).emit("match_result", {
+                    winner: opponent,
+                    reason: "opponent_disconnected",
+                    finalState: currentRoom.getGameState(),
+                    timestamp: new Date().toISOString(),
+                  });
+
+                  // Clean up room after showing results
+                  setTimeout(() => {
+                    rooms.delete(roomId);
+                    userRoomMap.delete(userId);
+                    console.log(`🗑️ Room ${roomId} deleted (opponent left)`);
+                  }, 10000);
+                }
+              }
+            }
+
+            disconnectTimeouts.delete(timeoutKey);
+          }, 30000); // 30 second grace period for reconnection
+
+          disconnectTimeouts.set(timeoutKey, {
+            notifyTimeout,
+            cleanupTimeout,
+          });
         }
       }
     });
